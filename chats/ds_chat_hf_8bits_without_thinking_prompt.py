@@ -48,23 +48,26 @@ def load_model() -> Tuple[AutoTokenizer, AutoModelForCausalLM]:
         Tuple: The tokenizer and model objects.
     """
     load_dotenv()
-    model_name = os.getenv("MODEL_NAME")
+    model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     logger.info(f"Loading model: {model_name}")
 
     # Load model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    # Define the quantization configuration for 8-bit
+    # More stable quantization configuration
     quantization_config = BitsAndBytesConfig(
-        load_in_8bit=True,
-        llm_int8_threshold=6.0,
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16,  # Use float16 instead of default
+        bnb_4bit_quant_type="nf4",  # Normalized float 4-bit
+        bnb_4bit_use_double_quant=True,  # Nested quantization for better accuracy
     )
 
-    # Load model
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        device_map="auto",  #! Dynamically balancing between CPU and GPU
-        quantization_config=quantization_config,  #! Quantization
+        device_map="auto",
+        quantization_config=quantization_config,
+        torch_dtype=torch.float16,  # Consistent dtype
+        trust_remote_code=True,  # For DeepSeek models
     )
 
     logger.info(f"Model ({model_name}) loaded.")

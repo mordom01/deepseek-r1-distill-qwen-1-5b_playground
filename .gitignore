@@ -17,6 +17,8 @@ node_modules/
 
 # Ignore log files
 *.log
+*.txt
+*.json
 
 # Ignore configuration files
 .config/

@@ -52,7 +52,7 @@ def load_model() -> Tuple[AutoTokenizer, AutoModelForCausalLM]:
         Tuple: The tokenizer and model objects.
     """
     load_dotenv()
-    model_name = os.getenv("MODEL_NAME")
+    model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     logger.info(f"Loading model: {model_name}")
 
     # Load model and tokenizer

@@ -34,9 +34,9 @@ safetensors==0.5.2
 sympy==1.13.1
 tokenizers==0.21.0
 tomlkit==0.13.2
-torch==2.5.1+cu121
-torchaudio==2.5.1+cu121
-torchvision==0.20.1+cu121
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
 tqdm==4.67.1
 transformers==4.48.2
 typing_extensions==4.13.2
