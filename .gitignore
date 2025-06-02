@@ -27,6 +27,7 @@ node_modules/
 *.exe
 *.dll
 *.zip
+*.pyc
 
 # Ignore documentation files
 docs/
@@ -41,3 +42,4 @@ testing_find_git.py
 # Folders not to be share
 sandbox/
 documents/
+/deepseek_env/
