@@ -294,7 +294,7 @@ class EnhancedDeepSeekBenchmark:
         self.bottleneck_analyzer = ComputeMemoryBoundAnalyzer()
         
         # Batch processing configurations
-        self.batch_sizes = [1, 2, 4, 8]  # Start smaller for testing
+        self.batch_sizes = [128, 256, 512, 1024]  # Start smaller for testing
         self.max_seq_length = 2048
         
         # Log GPU memory after model loading
@@ -738,7 +738,7 @@ def main():
     
     # Test with small dataset first
     logger.info("Loading test dataset...")
-    examples = benchmark.load_benchmark_dataset("gsm8k", "main", "test", limit=16)
+    examples = benchmark.load_benchmark_dataset("gsm8k", "main", "test", limit=1024)
     
     if not examples:
         logger.error("No examples loaded! Check your dataset configuration.")
