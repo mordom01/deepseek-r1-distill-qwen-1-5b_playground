@@ -66,7 +66,13 @@ class BnBCounterExtractor:
                 'get_scaling_factor_count',
                 'get_memory_access_count',
                 'get_kernel_call_count',
-                'reset_bnb_counters'
+                'reset_bnb_counters',
+                # NEW: Advanced metric functions
+                'get_warp_divergence_count',
+                'get_cache_line_loads',
+                'get_bytes_loaded',
+                'get_coalesced_loads',
+                'get_scattered_loads'
             ]
             
             for func_name in functions:
@@ -80,17 +86,24 @@ class BnBCounterExtractor:
                 self.lib.extract_bnb_counter_data.argtypes = []
                 self.lib.extract_bnb_counter_data.restype = None
             
-            # get_*_count(count*) -> void
+            # Basic counter getters
             for func_name in ['get_nf4_lookup_count', 'get_scaling_factor_count', 
-                             'get_memory_access_count', 'get_kernel_call_count']:
+                            'get_memory_access_count', 'get_kernel_call_count',
+                            'get_warp_divergence_count', 'get_cache_line_loads',
+                            'get_coalesced_loads', 'get_scattered_loads']:
                 if hasattr(self.lib, func_name):
                     getattr(self.lib, func_name).argtypes = [ctypes.POINTER(ctypes.c_uint)]
                     getattr(self.lib, func_name).restype = None
             
-            # reset_bnb_counters() -> void
+            # Special case for bytes_loaded (64-bit)
+            if hasattr(self.lib, 'get_bytes_loaded'):
+                self.lib.get_bytes_loaded.argtypes = [ctypes.POINTER(ctypes.c_ulonglong)]
+                self.lib.get_bytes_loaded.restype = None
+            
+            # UPDATED: reset_bnb_counters() -> bool (was void)
             if hasattr(self.lib, 'reset_bnb_counters'):
                 self.lib.reset_bnb_counters.argtypes = []
-                self.lib.reset_bnb_counters.restype = None
+                self.lib.reset_bnb_counters.restype = ctypes.c_bool  # CHANGED FROM None
                 
         except Exception as e:
             print(f"⚠️ Function prototype setup failed: {e}")
@@ -120,9 +133,23 @@ class BnBCounterExtractor:
             return False
     
     def extract_counter_data(self):
-        """Extract counter data from GPU to CPU"""
+        """Extract counter data from GPU to CPU with enhanced error handling"""
         if self.lib and hasattr(self.lib, 'extract_bnb_counter_data'):
-            self.lib.extract_bnb_counter_data()
+            try:
+                # Call the C++ extraction function
+                self.lib.extract_bnb_counter_data()
+                
+                # Optional: Verify extraction worked by spot-checking a counter
+                # This helps catch GPU->CPU transfer issues
+                test_count = self.get_nf4_lookup_count()
+                if test_count < 0:  # Sanity check for corrupted data
+                    print("⚠️ Warning: Counter extraction may have failed - negative values detected")
+                    
+            except Exception as e:
+                print(f"⚠️ Counter extraction failed: {e}")
+                # Don't raise - let the caller handle missing data gracefully
+        else:
+            print("⚠️ extract_bnb_counter_data function not available")
     
     def get_nf4_lookup_count(self) -> int:
         """Get NF4 lookup operation count"""
@@ -171,83 +198,176 @@ class BnBCounterExtractor:
             return count.value
         except Exception:
             return 0
-    
-    def reset_counters(self):
-        """Reset all operation counters with enhanced verification for large models"""
+        
+    # ADD these missing functions to BnBCounterExtractor class:
+
+    def get_warp_divergence_count(self) -> int:
+        """Get warp divergence count - tracks branch divergence in warps"""
+        if not self.lib or not hasattr(self.lib, 'get_warp_divergence_count'):
+            return 0
+        
+        try:
+            count = ctypes.c_uint()
+            self.lib.get_warp_divergence_count(ctypes.byref(count))
+            return count.value
+        except Exception:
+            return 0
+
+    def get_cache_line_loads(self) -> int:
+        """Get cache line load count - tracks unique 128-byte memory chunks loaded"""
+        if not self.lib or not hasattr(self.lib, 'get_cache_line_loads'):
+            return 0
+        
+        try:
+            count = ctypes.c_uint()
+            self.lib.get_cache_line_loads(ctypes.byref(count))
+            return count.value
+        except Exception:
+            return 0
+
+    def get_bytes_loaded(self) -> int:
+        """Get total bytes loaded from memory"""
+        if not self.lib or not hasattr(self.lib, 'get_bytes_loaded'):
+            return 0
+        
+        try:
+            count = ctypes.c_ulonglong()
+            self.lib.get_bytes_loaded(ctypes.byref(count))
+            return count.value
+        except Exception:
+            return 0
+
+    def get_coalesced_loads(self) -> int:
+        """Get coalesced load count - efficient memory access patterns"""
+        if not self.lib or not hasattr(self.lib, 'get_coalesced_loads'):
+            return 0
+        
+        try:
+            count = ctypes.c_uint()
+            self.lib.get_coalesced_loads(ctypes.byref(count))
+            return count.value
+        except Exception:
+            return 0
+
+    def get_scattered_loads(self) -> int:
+        """Get scattered load count - inefficient memory access patterns"""
+        if not self.lib or not hasattr(self.lib, 'get_scattered_loads'):
+            return 0
+        
+        try:
+            count = ctypes.c_uint()
+            self.lib.get_scattered_loads(ctypes.byref(count))
+            return count.value
+        except Exception:
+            return 0
+
+    def get_comprehensive_counter_report(self) -> Dict[str, int]:
+        """Get comprehensive counter report including advanced metrics"""
+        
+        # Extract latest counter data
+        self.extract_counter_data()
+        
+        # Get all basic counts
+        report = {
+            'nf4_lookup_count': self.get_nf4_lookup_count(),
+            'scaling_factor_count': self.get_scaling_factor_count(),
+            'memory_access_count': self.get_memory_access_count(),
+            'kernel_call_count': self.get_kernel_call_count(),
+            'warp_divergence_count': self.get_warp_divergence_count(),  # UPDATED
+            'cache_line_loads': self.get_cache_line_loads(),
+            'bytes_loaded': self.get_bytes_loaded(),
+            'coalesced_loads': self.get_coalesced_loads(),
+            'scattered_loads': self.get_scattered_loads(),
+        }
+        
+        # Calculate total operations
+        total_ops = (report['nf4_lookup_count'] + 
+                    report['scaling_factor_count'] + 
+                    report['memory_access_count'])
+        report['total_operations'] = total_ops
+        
+        # UPDATED: Use actual warp divergence count instead of estimation
+        if report['kernel_call_count'] > 0:
+            # Use the actual measured warp divergence count
+            total_warps = report['kernel_call_count'] * (512 / 32)  # Assume 512 threads per kernel
+            if total_warps > 0:
+                divergence_rate = (report['warp_divergence_count'] / total_warps) * 100
+                report['divergence_rate'] = min(divergence_rate, 100.0)  # Cap at 100%
+            else:
+                report['divergence_rate'] = 0
+        else:
+            report['divergence_rate'] = 0
+        
+        # Calculate memory coalescing efficiency
+        total_loads = report['coalesced_loads'] + report['scattered_loads']
+        if total_loads > 0:
+            report['coalescing_efficiency'] = (report['coalesced_loads'] / 
+                                            total_loads) * 100
+        else:
+            report['coalescing_efficiency'] = 0
+        
+        # Calculate cache efficiency (accesses per cache line)
+        if report['cache_line_loads'] > 0:
+            report['accesses_per_cache_line'] = (report['scaling_factor_count'] / 
+                                                report['cache_line_loads'])
+        else:
+            report['accesses_per_cache_line'] = 0
+        
+        return report
+
+    def reset_counters(self) -> bool:
+        """Reset all operation Counters with enhanced verification for large models"""
         if self.lib and hasattr(self.lib, 'reset_bnb_counters'):
             try:
                 import torch
+                import time
                 if not torch.cuda.is_available():
                     return False
                 
                 # Save current device
                 current_device = torch.cuda.current_device()
                 
-                # Method 1: Stream-based reset with memory clearing
-                reset_stream = torch.cuda.Stream()
-                with torch.cuda.stream(reset_stream):
-                    # Clear GPU caches before reset
-                    torch.cuda.empty_cache()
-                    
-                    # Reset counters
-                    self.lib.reset_bnb_counters()
-                    
-                    # Force completion
-                    reset_stream.synchronize()
-                
-                # Method 2: Device-wide synchronization
+                # Method 1: Clear GPU caches before reset
+                torch.cuda.empty_cache()
                 torch.cuda.synchronize(device=current_device)
                 
-                # Method 3: Memory fence for global consistency
-                if hasattr(torch.cuda, 'memory_barrier'):
-                    torch.cuda.memory_barrier()
+                # Method 2: Call improved C++ reset function (returns bool now)
+                reset_success = bool(self.lib.reset_bnb_counters())
                 
-                # Extra synchronization for large models
-                import time
-                time.sleep(0.2)  # Increased delay for large models
+                if not reset_success:
+                    print("   🚨 C++ counter reset failed")
+                    return False
                 
-                # Method 4: Double reset (sometimes helps with persistent state)
-                self.lib.reset_bnb_counters()
+                # Method 3: Additional verification
                 torch.cuda.synchronize()
-                time.sleep(0.1)
+                time.sleep(0.1)  # Brief pause for large models
                 
-                # Force data extraction to refresh host-side copies
+                # Method 4: Verify reset worked by checking counters
                 self.extract_counter_data()
-                torch.cuda.synchronize()
                 
-                # Verify reset worked
-                for verify_attempt in range(3):
-                    self.extract_counter_data()
-                    
-                    nf4_count = self.get_nf4_lookup_count()
-                    scaling_count = self.get_scaling_factor_count()
-                    memory_count = self.get_memory_access_count()
-                    kernel_count = self.get_kernel_call_count()
-                    
-                    total_remaining = nf4_count + scaling_count + memory_count + kernel_count
-                    
-                    if total_remaining == 0:
-                        return True
-                        
-                    # If not zero, try one more aggressive sync
-                    torch.cuda.synchronize()
-                    time.sleep(0.1)
+                nf4_count = self.get_nf4_lookup_count()
+                scaling_count = self.get_scaling_factor_count()
+                memory_count = self.get_memory_access_count()
+                kernel_count = self.get_kernel_call_count()
                 
-                # If we get here, reset failed
-                print(f"⚠️ Reset incomplete after enhanced attempts: {total_remaining:,} ops remaining")
-                print(f"   NF4: {nf4_count:,}, Scaling: {scaling_count:,}, Memory: {memory_count:,}, Kernels: {kernel_count:,}")
+                total_remaining = nf4_count + scaling_count + memory_count + kernel_count
                 
-                # Last resort: Try to detect if it's a cumulative issue
-                if kernel_count > 0 and kernel_count % 864 == 0:
-                    print("   🔍 Detected multiple of base kernel count - likely accumulation issue")
-                    
-                return False
+                if total_remaining == 0:
+                    print("   ✅ Counter reset successful - all counters at zero")
+                    return True
+                else:
+                    print(f"   ⚠️ Reset incomplete: {total_remaining:,} ops remaining")
+                    print(f"       NF4: {nf4_count:,}, Scaling: {scaling_count:,}")
+                    print(f"       Memory: {memory_count:,}, Kernels: {kernel_count:,}")
+                    return False
                     
             except Exception as e:
-                print(f"❌ Counter reset error: {e}")
+                print(f"   ❌ Counter reset error: {e}")
                 import traceback
                 traceback.print_exc()
                 return False
+        
+        print("   ❌ reset_bnb_counters function not available")
         return False
 
     def force_gpu_memory_clear(self):
@@ -382,23 +502,6 @@ class BnBCounterExtractor:
             print(f"❌ Diagnosis failed: {e}")
             import traceback
             traceback.print_exc()
-    
-    def get_comprehensive_counter_report(self) -> Dict[str, int]:
-        """Get comprehensive counter report for all operations"""
-        
-        # Extract latest counter data
-        self.extract_counter_data()
-        
-        # Get all counts
-        return {
-            'nf4_lookup_count': self.get_nf4_lookup_count(),
-            'scaling_factor_count': self.get_scaling_factor_count(),
-            'memory_access_count': self.get_memory_access_count(),
-            'kernel_call_count': self.get_kernel_call_count(),
-            'total_operations': (self.get_nf4_lookup_count() + 
-                               self.get_scaling_factor_count() + 
-                               self.get_memory_access_count()),
-        }
 
 
 # Global counter extractor instance
@@ -421,7 +524,7 @@ def test_instrumentation() -> bool:
         return False
 
 def print_counter_summary():
-    """Print a summary of operation counters"""
+    """Print a summary of operation counters including advanced metrics"""
     
     print("🔍 BITSANDBYTES OPERATION COUNTER SUMMARY")
     print("=" * 50)
@@ -430,18 +533,35 @@ def print_counter_summary():
         extractor = get_counter_extractor()
         report = extractor.get_comprehensive_counter_report()
         
-        print(f"📊 Operation Counts:")
+        print(f"📊 Basic Operation Counts:")
         print(f"  NF4 lookups: {report['nf4_lookup_count']:,}")
         print(f"  Scaling factor accesses: {report['scaling_factor_count']:,}")
         print(f"  Memory accesses: {report['memory_access_count']:,}")
         print(f"  Kernel calls: {report['kernel_call_count']:,}")
         print(f"  Total operations: {report['total_operations']:,}")
         
+        print(f"\n📈 Performance Metrics:")
+        print(f"  Branch divergence rate: {report['divergence_rate']:.1f}%")
+        print(f"  Memory coalescing efficiency: {report['coalescing_efficiency']:.1f}%")
+        print(f"  Cache line loads: {report['cache_line_loads']:,}")
+        print(f"  Accesses per cache line: {report['accesses_per_cache_line']:.1f}")
+        print(f"  Total bytes loaded: {report['bytes_loaded']:,} ({report['bytes_loaded']/1e9:.2f} GB)")
+        
         if report['kernel_call_count'] > 0:
             print(f"\n📈 Averages per kernel call:")
-            print(f"  NF4 lookups/kernel: {report['nf4_lookup_count'] / report['kernel_call_count']:.1f}")
-            print(f"  Scaling accesses/kernel: {report['scaling_factor_count'] / report['kernel_call_count']:.1f}")
-            print(f"  Memory accesses/kernel: {report['memory_access_count'] / report['kernel_call_count']:.1f}")
+            print(f"  NF4 lookups/kernel: {report['nf4_lookup_count'] / report['kernel_call_count']:,.1f}")
+            print(f"  Scaling accesses/kernel: {report['scaling_factor_count'] / report['kernel_call_count']:,.1f}")
+            print(f"  Memory accesses/kernel: {report['memory_access_count'] / report['kernel_call_count']:,.1f}")
+            print(f"  Bytes/kernel: {report['bytes_loaded'] / report['kernel_call_count']:,.0f}")
+        
+        # Identify optimization opportunities
+        print(f"\n🎯 Optimization Opportunities:")
+        if report['divergence_rate'] > 10:
+            print(f"  ⚠️ High branch divergence ({report['divergence_rate']:.1f}%) - constant memory will help!")
+        if report['coalescing_efficiency'] < 70:
+            print(f"  ⚠️ Poor memory coalescing ({report['coalescing_efficiency']:.1f}%) - vectorized access needed!")
+        if report['accesses_per_cache_line'] < 4:
+            print(f"  ⚠️ Inefficient cache usage ({report['accesses_per_cache_line']:.1f} accesses/line) - shared memory will help!")
         
     except Exception as e:
         print(f"❌ Failed to extract counter data: {e}")
